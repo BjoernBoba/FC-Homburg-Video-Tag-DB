@@ -20,6 +20,7 @@ CREATE TABLE tags (
   id         UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   name       TEXT NOT NULL UNIQUE,
   color      TEXT NOT NULL DEFAULT '#6B7280',
+  created_by UUID    REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

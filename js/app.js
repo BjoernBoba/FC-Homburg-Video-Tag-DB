@@ -20,10 +20,11 @@ const db = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 
 // ===== STATE =====
 const state = {
-  user:            null,
-  teams:           [],
-  tags:            [],
+  user:              null,
+  teams:             [],
+  tags:              [],
   querySelectedTags: new Set(),
+  queryOnlyMyTags:   false,
 };
 const sceneTagSets = new Map(); // gameId → Set of selected tag IDs
 
@@ -512,6 +513,19 @@ async function saveEditGame(gameId) {
 // ===== QUERY VIEW =====
 document.getElementById('btn-search').addEventListener('click', handleQuery);
 
+document.getElementById('btn-filter-own-tags').addEventListener('click', () => {
+  state.queryOnlyMyTags = !state.queryOnlyMyTags;
+  const btn = document.getElementById('btn-filter-own-tags');
+  const label = document.getElementById('creator-filter-label');
+  if (state.queryOnlyMyTags) {
+    btn.classList.replace('btn-secondary', 'btn-primary');
+    label.textContent = 'Nur meine Tags';
+  } else {
+    btn.classList.replace('btn-primary', 'btn-secondary');
+    label.textContent = 'Alle Ersteller';
+  }
+});
+
 document.getElementById('btn-reset-filter').addEventListener('click', () => {
   document.getElementById('filter-season').value    = '';
   document.getElementById('filter-team').value      = '';
@@ -519,6 +533,10 @@ document.getElementById('btn-reset-filter').addEventListener('click', () => {
   document.getElementById('filter-date-to').value    = '';
   document.getElementById('filter-opponent').value   = '';
   state.querySelectedTags.clear();
+  state.queryOnlyMyTags = false;
+  const btn = document.getElementById('btn-filter-own-tags');
+  btn.classList.replace('btn-primary', 'btn-secondary');
+  document.getElementById('creator-filter-label').textContent = 'Alle Ersteller';
   renderTagSelector('query-tag-selector', state.querySelectedTags);
   document.getElementById('query-results').innerHTML = '<p class="results-hint">Filter anwenden um Szenen anzuzeigen.</p>';
 });
@@ -554,6 +572,27 @@ async function handleQuery() {
     const { data: tagged } = await db.from('entry_tags').select('entry_id').in('tag_id', tagIds);
     if (!tagged || tagged.length === 0) { resultsEl.innerHTML = '<p class="results-hint">Keine Szenen gefunden.</p>'; return; }
     entryIdFilter = [...new Set(tagged.map(r => r.entry_id))];
+  }
+
+  // 2b. Creator-Filter ("Nur meine")
+  if (state.queryOnlyMyTags) {
+    const { data: myTags } = await db.from('tags').select('id').eq('created_by', state.user.id);
+    const myTagIds = (myTags ?? []).map(t => t.id);
+    if (myTagIds.length === 0) {
+      resultsEl.innerHTML = '<p class="results-hint">Du hast noch keine eigenen Tags erstellt.</p>';
+      return;
+    }
+    const { data: myTagEntries } = await db.from('entry_tags').select('entry_id').in('tag_id', myTagIds);
+    const myEntryIds = new Set((myTagEntries ?? []).map(r => r.entry_id));
+    if (entryIdFilter) {
+      entryIdFilter = entryIdFilter.filter(id => myEntryIds.has(id));
+    } else {
+      entryIdFilter = [...myEntryIds];
+    }
+    if (entryIdFilter.length === 0) {
+      resultsEl.innerHTML = '<p class="results-hint">Keine Szenen gefunden.</p>';
+      return;
+    }
   }
 
   // 3. Szenen laden
@@ -630,6 +669,7 @@ async function renderTagsList() {
       <div class="tag-row-display" id="tag-display-${tag.id}">
         <div class="tag-swatch" style="background:${tag.color}"></div>
         <span class="tag-row-name">${escHtml(tag.name)}</span>
+        ${tag.created_by === state.user.id ? '<span class="tag-owner-badge">von mir</span>' : ''}
       </div>
       <div class="tag-row-edit" id="tag-edit-${tag.id}">
         <input type="text" id="tag-edit-name-${tag.id}" value="${escHtml(tag.name)}" maxlength="60">
@@ -690,7 +730,7 @@ document.getElementById('btn-add-tag').addEventListener('click', async () => {
   const name  = document.getElementById('new-tag-name').value.trim();
   const color = document.getElementById('new-tag-color').value;
   if (!name) { showFeedback('add-tag-feedback', 'Bitte einen Tag-Namen eingeben.', 'error'); return; }
-  const { error } = await db.from('tags').insert({ name, color });
+  const { error } = await db.from('tags').insert({ name, color, created_by: state.user.id });
   if (error) {
     showFeedback('add-tag-feedback',
       (error.message.includes('unique') || error.code === '23505') ? `Tag "${name}" existiert bereits.` : 'Fehler: ' + error.message,
