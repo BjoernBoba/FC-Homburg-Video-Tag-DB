@@ -240,7 +240,7 @@ function buildGameCardHtml(g, sceneCount) {
     ? `<span class="game-location-badge ${locClass}">${escHtml(g.home_away)}</span>` : '';
   const resultText = g.result ? escHtml(g.result) : '<span style="color:#94A3B8">—</span>';
   const videoLinkHtml = g.video_link
-    ? `<a href="${escHtml(g.video_link)}" target="_blank" rel="noopener" class="video-link">🎬 Video</a>` : '';
+    ? `<a href="${escHtml(/^https?:\/\//i.test(g.video_link) ? g.video_link : 'https://' + g.video_link)}" target="_blank" rel="noopener" class="video-link">🎬 Video</a>` : '';
 
   const teamOptions = state.teams.map(t =>
     `<option value="${t.id}" ${t.id === g.team_id ? 'selected' : ''}>${escHtml(t.name)}</option>`
@@ -306,12 +306,12 @@ function buildGameCardHtml(g, sceneCount) {
           </div>
           <div class="form-group">
             <label>Ergebnis <span class="label-hint">(optional)</span></label>
-            <input type="text" id="edit-result-${g.id}" value="${escHtml(g.result || '')}" maxlength="20" placeholder="3:1">
+            <input type="text" id="edit-result-${g.id}" value="${escHtml(g.result || '')}" maxlength="20">
           </div>
         </div>
         <div class="form-group">
           <label>Link zum Video <span class="label-hint">(optional)</span></label>
-          <input type="url" id="edit-video-${g.id}" value="${escHtml(g.video_link || '')}" maxlength="500" placeholder="https://...">
+          <input type="text" id="edit-video-${g.id}" value="${escHtml(g.video_link || '')}" maxlength="500">
         </div>
         <div class="form-actions">
           <button class="btn-primary btn-sm" onclick="saveEditGame('${g.id}')">Speichern</button>
