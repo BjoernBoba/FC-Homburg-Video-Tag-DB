@@ -523,18 +523,6 @@ input[type="color"] {
   color: var(--text);
 }
 
-/* ===== TAG OWNER BADGE ===== */
-.tag-owner-badge {
-  font-size: .7rem;
-  font-weight: 600;
-  padding: .15rem .45rem;
-  border-radius: 999px;
-  background: #EEF2FF;
-  color: #6366F1;
-  border: 1px solid #C7D2FE;
-  white-space: nowrap;
-}
-
 /* ===== GAME EDIT FORM ===== */
 .game-edit-form {
   border-top: 1px solid var(--border);

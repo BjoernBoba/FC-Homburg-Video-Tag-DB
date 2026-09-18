@@ -530,10 +530,10 @@ document.querySelectorAll('.creator-mode-btn').forEach(btn => {
 });
 
 async function loadAndRenderCreators() {
-  const { data } = await db.from('tags').select('created_by').not('created_by', 'is', null);
+  const { data } = await db.from('entries').select('created_by').not('created_by', 'is', null);
   const ids = [...new Set((data ?? []).map(t => t.created_by))];
   const dropdown = document.getElementById('creator-select-dropdown');
-  if (ids.length === 0) { dropdown.innerHTML = '<p class="label-hint">Noch keine Tags mit Erstellerangabe.</p>'; return; }
+  if (ids.length === 0) { dropdown.innerHTML = '<p class="label-hint">Noch keine Einträge mit Erstellerangabe.</p>'; return; }
   dropdown.innerHTML = ids.map(id => {
     const label = id === state.user.id ? `Ich (${state.user.email})` : `Nutzer (${id.slice(0, 8)}…)`;
     const checked = state.querySelectedCreators.has(id) ? 'checked' : '';
@@ -601,32 +601,13 @@ async function handleQuery() {
     state.queryCreatorMode === 'selected' ? [...state.querySelectedCreators] :
     null;
 
-  if (creatorIds && creatorIds.length > 0) {
-    const { data: creatorTags } = await db.from('tags').select('id').in('created_by', creatorIds);
-    const creatorTagIds = (creatorTags ?? []).map(t => t.id);
-    if (creatorTagIds.length === 0) {
-      resultsEl.innerHTML = '<p class="results-hint">Keine Tags von diesem Ersteller gefunden.</p>';
-      return;
-    }
-    const { data: creatorEntries } = await db.from('entry_tags').select('entry_id').in('tag_id', creatorTagIds);
-    const creatorEntryIds = new Set((creatorEntries ?? []).map(r => r.entry_id));
-    if (entryIdFilter) {
-      entryIdFilter = entryIdFilter.filter(id => creatorEntryIds.has(id));
-    } else {
-      entryIdFilter = [...creatorEntryIds];
-    }
-    if (entryIdFilter.length === 0) {
-      resultsEl.innerHTML = '<p class="results-hint">Keine Szenen gefunden.</p>';
-      return;
-    }
-  }
-
   // 3. Szenen laden
   let eq = db.from('entries')
     .select('id,game_id,minute,second,comment,entry_tags(tag:tags(id,name,color))')
     .in('game_id', gameIds)
     .order('minute').order('second');
-  if (entryIdFilter) eq = eq.in('id', entryIdFilter);
+  if (entryIdFilter)                        eq = eq.in('id', entryIdFilter);
+  if (creatorIds && creatorIds.length > 0)  eq = eq.in('created_by', creatorIds);
 
   const { data: entries } = await eq;
   if (!entries || entries.length === 0) { resultsEl.innerHTML = '<p class="results-hint">Keine Szenen gefunden.</p>'; return; }
@@ -695,7 +676,6 @@ async function renderTagsList() {
       <div class="tag-row-display" id="tag-display-${tag.id}">
         <div class="tag-swatch" style="background:${tag.color}"></div>
         <span class="tag-row-name">${escHtml(tag.name)}</span>
-        ${tag.created_by === state.user.id ? '<span class="tag-owner-badge">von mir</span>' : ''}
       </div>
       <div class="tag-row-edit" id="tag-edit-${tag.id}">
         <input type="text" id="tag-edit-name-${tag.id}" value="${escHtml(tag.name)}" maxlength="60">
@@ -756,7 +736,7 @@ document.getElementById('btn-add-tag').addEventListener('click', async () => {
   const name  = document.getElementById('new-tag-name').value.trim();
   const color = document.getElementById('new-tag-color').value;
   if (!name) { showFeedback('add-tag-feedback', 'Bitte einen Tag-Namen eingeben.', 'error'); return; }
-  const { error } = await db.from('tags').insert({ name, color, created_by: state.user.id });
+  const { error } = await db.from('tags').insert({ name, color });
   if (error) {
     showFeedback('add-tag-feedback',
       (error.message.includes('unique') || error.code === '23505') ? `Tag "${name}" existiert bereits.` : 'Fehler: ' + error.message,
