@@ -20,11 +20,12 @@ const db = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 
 // ===== STATE =====
 const state = {
-  user:              null,
-  teams:             [],
-  tags:              [],
-  querySelectedTags: new Set(),
-  queryOnlyMyTags:   false,
+  user:                  null,
+  teams:                 [],
+  tags:                  [],
+  querySelectedTags:     new Set(),
+  queryCreatorMode:      'all',     // 'all' | 'mine' | 'selected'
+  querySelectedCreators: new Set(),
 };
 const sceneTagSets = new Map(); // gameId → Set of selected tag IDs
 
@@ -74,7 +75,7 @@ function showView(name) {
   document.querySelector(`[data-view="${name}"]`).classList.add('active');
 
   if (name === 'games')  renderGamesList();
-  if (name === 'query')  { loadQuerySeasons(); populateFilterTeams(); renderTagSelector('query-tag-selector', state.querySelectedTags); }
+  if (name === 'query')  { loadQuerySeasons(); populateFilterTeams(); renderTagSelector('query-tag-selector', state.querySelectedTags); loadAndRenderCreators(); }
   if (name === 'tags')   renderTagsList();
 }
 
@@ -513,30 +514,50 @@ async function saveEditGame(gameId) {
 // ===== QUERY VIEW =====
 document.getElementById('btn-search').addEventListener('click', handleQuery);
 
-document.getElementById('btn-filter-own-tags').addEventListener('click', () => {
-  state.queryOnlyMyTags = !state.queryOnlyMyTags;
-  const btn = document.getElementById('btn-filter-own-tags');
-  const label = document.getElementById('creator-filter-label');
-  if (state.queryOnlyMyTags) {
-    btn.classList.replace('btn-secondary', 'btn-primary');
-    label.textContent = 'Nur meine Tags';
-  } else {
-    btn.classList.replace('btn-primary', 'btn-secondary');
-    label.textContent = 'Alle Ersteller';
-  }
+document.querySelectorAll('.creator-mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.creator-mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.queryCreatorMode = btn.dataset.mode;
+    const dropdown = document.getElementById('creator-select-dropdown');
+    if (state.queryCreatorMode === 'selected') {
+      dropdown.classList.remove('hidden');
+    } else {
+      dropdown.classList.add('hidden');
+      state.querySelectedCreators.clear();
+    }
+  });
 });
 
+async function loadAndRenderCreators() {
+  const { data } = await db.from('tags').select('created_by').not('created_by', 'is', null);
+  const ids = [...new Set((data ?? []).map(t => t.created_by))];
+  const dropdown = document.getElementById('creator-select-dropdown');
+  if (ids.length === 0) { dropdown.innerHTML = '<p class="label-hint">Noch keine Tags mit Erstellerangabe.</p>'; return; }
+  dropdown.innerHTML = ids.map(id => {
+    const label = id === state.user.id ? `Ich (${state.user.email})` : `Nutzer (${id.slice(0, 8)}…)`;
+    const checked = state.querySelectedCreators.has(id) ? 'checked' : '';
+    return `<label class="creator-option"><input type="checkbox" value="${id}" ${checked}> ${escHtml(label)}</label>`;
+  }).join('');
+  dropdown.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) state.querySelectedCreators.add(cb.value);
+      else state.querySelectedCreators.delete(cb.value);
+    });
+  });
+}
+
 document.getElementById('btn-reset-filter').addEventListener('click', () => {
-  document.getElementById('filter-season').value    = '';
-  document.getElementById('filter-team').value      = '';
+  document.getElementById('filter-season').value     = '';
+  document.getElementById('filter-team').value       = '';
   document.getElementById('filter-date-from').value  = '';
   document.getElementById('filter-date-to').value    = '';
   document.getElementById('filter-opponent').value   = '';
   state.querySelectedTags.clear();
-  state.queryOnlyMyTags = false;
-  const btn = document.getElementById('btn-filter-own-tags');
-  btn.classList.replace('btn-primary', 'btn-secondary');
-  document.getElementById('creator-filter-label').textContent = 'Alle Ersteller';
+  state.queryCreatorMode = 'all';
+  state.querySelectedCreators.clear();
+  document.querySelectorAll('.creator-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === 'all'));
+  document.getElementById('creator-select-dropdown').classList.add('hidden');
   renderTagSelector('query-tag-selector', state.querySelectedTags);
   document.getElementById('query-results').innerHTML = '<p class="results-hint">Filter anwenden um Szenen anzuzeigen.</p>';
 });
@@ -574,20 +595,25 @@ async function handleQuery() {
     entryIdFilter = [...new Set(tagged.map(r => r.entry_id))];
   }
 
-  // 2b. Creator-Filter ("Nur meine")
-  if (state.queryOnlyMyTags) {
-    const { data: myTags } = await db.from('tags').select('id').eq('created_by', state.user.id);
-    const myTagIds = (myTags ?? []).map(t => t.id);
-    if (myTagIds.length === 0) {
-      resultsEl.innerHTML = '<p class="results-hint">Du hast noch keine eigenen Tags erstellt.</p>';
+  // 2b. Creator-Filter
+  const creatorIds =
+    state.queryCreatorMode === 'mine'     ? [state.user.id] :
+    state.queryCreatorMode === 'selected' ? [...state.querySelectedCreators] :
+    null;
+
+  if (creatorIds && creatorIds.length > 0) {
+    const { data: creatorTags } = await db.from('tags').select('id').in('created_by', creatorIds);
+    const creatorTagIds = (creatorTags ?? []).map(t => t.id);
+    if (creatorTagIds.length === 0) {
+      resultsEl.innerHTML = '<p class="results-hint">Keine Tags von diesem Ersteller gefunden.</p>';
       return;
     }
-    const { data: myTagEntries } = await db.from('entry_tags').select('entry_id').in('tag_id', myTagIds);
-    const myEntryIds = new Set((myTagEntries ?? []).map(r => r.entry_id));
+    const { data: creatorEntries } = await db.from('entry_tags').select('entry_id').in('tag_id', creatorTagIds);
+    const creatorEntryIds = new Set((creatorEntries ?? []).map(r => r.entry_id));
     if (entryIdFilter) {
-      entryIdFilter = entryIdFilter.filter(id => myEntryIds.has(id));
+      entryIdFilter = entryIdFilter.filter(id => creatorEntryIds.has(id));
     } else {
-      entryIdFilter = [...myEntryIds];
+      entryIdFilter = [...creatorEntryIds];
     }
     if (entryIdFilter.length === 0) {
       resultsEl.innerHTML = '<p class="results-hint">Keine Szenen gefunden.</p>';
