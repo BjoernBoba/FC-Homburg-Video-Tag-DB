@@ -172,11 +172,12 @@ document.getElementById('game-date').addEventListener('change', (e) => {
 
 document.getElementById('form-new-game').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const date     = document.getElementById('game-date').value;
-  const teamId   = document.getElementById('game-team').value;
-  const homeAway = document.getElementById('game-home-away').value;
-  const opponent = document.getElementById('game-opponent').value.trim();
-  const result   = document.getElementById('game-result').value.trim();
+  const date      = document.getElementById('game-date').value;
+  const teamId    = document.getElementById('game-team').value;
+  const homeAway  = document.getElementById('game-home-away').value;
+  const opponent  = document.getElementById('game-opponent').value.trim();
+  const result    = document.getElementById('game-result').value.trim();
+  const videoLink = document.getElementById('game-video-link').value.trim();
   const btn = document.getElementById('btn-save-game');
 
   btn.disabled = true; btn.textContent = 'Speichern...';
@@ -184,7 +185,7 @@ document.getElementById('form-new-game').addEventListener('submit', async (e) =>
   const { error } = await db.from('games').insert({
     date, season: calculateSeason(date), team_id: teamId,
     opponent, home_away: homeAway || null, result: result || null,
-    created_by: state.user.id,
+    video_link: videoLink || null, created_by: state.user.id,
   });
 
   if (error) {
@@ -193,8 +194,9 @@ document.getElementById('form-new-game').addEventListener('submit', async (e) =>
     return;
   }
 
-  document.getElementById('game-opponent').value = '';
-  document.getElementById('game-result').value   = '';
+  document.getElementById('game-opponent').value   = '';
+  document.getElementById('game-result').value     = '';
+  document.getElementById('game-video-link').value = '';
   showToast('Spiel angelegt.');
   btn.disabled = false; btn.textContent = 'Spiel anlegen';
   await renderGamesList();
@@ -236,41 +238,86 @@ function buildGameCardHtml(g, sceneCount) {
   const locClass = g.home_away === 'Heim' ? 'heim' : 'auswaerts';
   const locBadge = g.home_away
     ? `<span class="game-location-badge ${locClass}">${escHtml(g.home_away)}</span>` : '';
-  const resultHtml = g.result
-    ? `<span class="game-result-text" id="result-text-${g.id}">${escHtml(g.result)}</span>`
-    : `<span class="game-result-text empty" id="result-text-${g.id}">—</span>`;
+  const resultText = g.result ? escHtml(g.result) : '<span style="color:#94A3B8">—</span>';
+  const videoLinkHtml = g.video_link
+    ? `<a href="${escHtml(g.video_link)}" target="_blank" rel="noopener" class="video-link">🎬 Video</a>` : '';
+
+  const teamOptions = state.teams.map(t =>
+    `<option value="${t.id}" ${t.id === g.team_id ? 'selected' : ''}>${escHtml(t.name)}</option>`
+  ).join('');
 
   return `
     <div class="game-card" id="game-${g.id}">
-      <div class="game-main">
+
+      <!-- Anzeige -->
+      <div class="game-main" id="game-main-${g.id}">
         <div class="game-info">
           <span class="entry-team-badge">${escHtml(g.team?.name ?? '—')}</span>
           <span class="game-date-text">${formatDate(g.date)}</span>
           <span class="game-vs">vs</span>
           <span class="game-opponent-text">${escHtml(g.opponent)}</span>
           ${locBadge}
-          <div class="game-result-area">
-            ${resultHtml}
-            <input type="text" class="game-result-input hidden" id="result-input-${g.id}"
-              value="${escHtml(g.result || '')}" maxlength="20" placeholder="3:1">
-            <button class="btn-icon" id="result-edit-btn-${g.id}"
-              onclick="startEditResult('${g.id}')" title="Ergebnis bearbeiten">✏</button>
-            <button class="btn-icon confirm hidden" id="result-save-btn-${g.id}"
-              onclick="saveResult('${g.id}')">✓</button>
-            <button class="btn-icon hidden" id="result-cancel-btn-${g.id}"
-              onclick="cancelEditResult('${g.id}')">✗</button>
-          </div>
+          <span class="game-result-text">${resultText}</span>
         </div>
         <div class="game-footer">
           <span class="game-season-text">${escHtml(g.season)}</span>
           <span class="dot-sep">·</span>
           <span class="scene-count" id="scene-count-${g.id}">${sceneCount} Szene${sceneCount !== 1 ? 'n' : ''}</span>
+          ${videoLinkHtml}
           <div class="game-btns">
             <button class="btn-secondary btn-sm" onclick="toggleGameScenes('${g.id}')">Szenen</button>
+            <button class="btn-edit btn-sm" onclick="startEditGame('${g.id}')">Bearbeiten</button>
             <button class="btn-primary btn-sm" onclick="toggleSceneForm('${g.id}')">+ Szene</button>
-            <button class="btn-danger btn-sm" onclick="deleteGame('${g.id}', '${escHtml(g.opponent).replace(/'/g,"\\'")}')">Löschen</button>
+            <button class="btn-danger btn-sm" onclick="deleteGame('${g.id}','${escHtml(g.opponent).replace(/'/g,"\\'")}')">Löschen</button>
           </div>
         </div>
+      </div>
+
+      <!-- Bearbeiten-Formular -->
+      <div class="game-edit-form hidden" id="game-edit-${g.id}">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Datum</label>
+            <input type="date" id="edit-date-${g.id}" value="${g.date}">
+          </div>
+          <div class="form-group">
+            <label>Saison</label>
+            <div class="season-display" id="edit-season-${g.id}">${escHtml(g.season)}</div>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Mannschaft</label>
+            <select id="edit-team-${g.id}">${teamOptions}</select>
+          </div>
+          <div class="form-group">
+            <label>Heim / Auswärts <span class="label-hint">(optional)</span></label>
+            <select id="edit-home-away-${g.id}">
+              <option value="" ${!g.home_away ? 'selected' : ''}>—</option>
+              <option value="Heim" ${g.home_away === 'Heim' ? 'selected' : ''}>Heim</option>
+              <option value="Auswärts" ${g.home_away === 'Auswärts' ? 'selected' : ''}>Auswärts</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Gegner</label>
+            <input type="text" id="edit-opponent-${g.id}" value="${escHtml(g.opponent)}" maxlength="80">
+          </div>
+          <div class="form-group">
+            <label>Ergebnis <span class="label-hint">(optional)</span></label>
+            <input type="text" id="edit-result-${g.id}" value="${escHtml(g.result || '')}" maxlength="20" placeholder="3:1">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Link zum Video <span class="label-hint">(optional)</span></label>
+          <input type="url" id="edit-video-${g.id}" value="${escHtml(g.video_link || '')}" maxlength="500" placeholder="https://...">
+        </div>
+        <div class="form-actions">
+          <button class="btn-primary btn-sm" onclick="saveEditGame('${g.id}')">Speichern</button>
+          <button class="btn-secondary btn-sm" onclick="cancelEditGame('${g.id}')">Abbrechen</button>
+        </div>
+        <div id="edit-feedback-${g.id}" class="feedback hidden"></div>
       </div>
 
       <!-- Inline Szene-Formular -->
@@ -421,34 +468,45 @@ async function deleteGame(gameId, opponent) {
   await renderGamesList();
 }
 
-// Ergebnis inline bearbeiten
-function startEditResult(gameId) {
-  document.getElementById(`result-text-${gameId}`).classList.add('hidden');
-  document.getElementById(`result-input-${gameId}`).classList.remove('hidden');
-  document.getElementById(`result-edit-btn-${gameId}`).classList.add('hidden');
-  document.getElementById(`result-save-btn-${gameId}`).classList.remove('hidden');
-  document.getElementById(`result-cancel-btn-${gameId}`).classList.remove('hidden');
-  document.getElementById(`result-input-${gameId}`).focus();
+// Spiel bearbeiten
+function startEditGame(gameId) {
+  document.getElementById(`game-main-${gameId}`).classList.add('hidden');
+  document.getElementById(`game-edit-${gameId}`).classList.remove('hidden');
+  const dateInput = document.getElementById(`edit-date-${gameId}`);
+  dateInput.addEventListener('change', () => {
+    document.getElementById(`edit-season-${gameId}`).textContent = calculateSeason(dateInput.value);
+  });
 }
 
-function cancelEditResult(gameId) {
-  document.getElementById(`result-text-${gameId}`).classList.remove('hidden');
-  document.getElementById(`result-input-${gameId}`).classList.add('hidden');
-  document.getElementById(`result-edit-btn-${gameId}`).classList.remove('hidden');
-  document.getElementById(`result-save-btn-${gameId}`).classList.add('hidden');
-  document.getElementById(`result-cancel-btn-${gameId}`).classList.add('hidden');
+function cancelEditGame(gameId) {
+  document.getElementById(`game-main-${gameId}`).classList.remove('hidden');
+  document.getElementById(`game-edit-${gameId}`).classList.add('hidden');
 }
 
-async function saveResult(gameId) {
-  const result = document.getElementById(`result-input-${gameId}`).value.trim();
-  const { error } = await db.from('games').update({ result: result || null }).eq('id', gameId);
-  if (error) { showToast('Fehler: ' + error.message, 'error'); return; }
+async function saveEditGame(gameId) {
+  const date      = document.getElementById(`edit-date-${gameId}`).value;
+  const teamId    = document.getElementById(`edit-team-${gameId}`).value;
+  const homeAway  = document.getElementById(`edit-home-away-${gameId}`).value;
+  const opponent  = document.getElementById(`edit-opponent-${gameId}`).value.trim();
+  const result    = document.getElementById(`edit-result-${gameId}`).value.trim();
+  const videoLink = document.getElementById(`edit-video-${gameId}`).value.trim();
 
-  const textEl = document.getElementById(`result-text-${gameId}`);
-  textEl.textContent = result || '—';
-  textEl.className = result ? 'game-result-text' : 'game-result-text empty';
-  cancelEditResult(gameId);
-  showToast('Ergebnis gespeichert.');
+  if (!date || !opponent) {
+    showFeedback(`edit-feedback-${gameId}`, 'Datum und Gegner sind Pflichtfelder.', 'error');
+    return;
+  }
+
+  const { error } = await db.from('games').update({
+    date, season: calculateSeason(date),
+    team_id: teamId || null, opponent,
+    home_away: homeAway || null, result: result || null,
+    video_link: videoLink || null,
+  }).eq('id', gameId);
+
+  if (error) { showFeedback(`edit-feedback-${gameId}`, 'Fehler: ' + error.message, 'error'); return; }
+
+  showToast('Spiel aktualisiert.');
+  await renderGamesList();
 }
 
 // ===== QUERY VIEW =====
